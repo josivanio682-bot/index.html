@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IA Gerador de Cortes 9:16</title>
+  
+  <script src="https://cdn.jsdelivr.net/npm/coi-serviceworker/coi-serviceworker.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { background-color: #0f172a; color: #f8fafc; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .container { background: #1e293b; width: 100%; max-width: 480px; padding: 24px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); text-align: center; }
+    h1 { font-size: 1.4rem; margin-bottom: 8px; color: #38bdf8; }
+    p.desc { font-size: 0.85rem; color: #94a3b8; margin-bottom: 20px; }
+    
+    .upload-group { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+    .upload-btn { background: #334155; padding: 12px; border-radius: 8px; border: 2px dashed #475569; cursor: pointer; text-align: left; }
+    .upload-btn label { font-size: 0.85rem; font-weight: bold; color: #38bdf8; display: block; margin-bottom: 4px; }
+    .upload-btn input { width: 100%; font-size: 0.85rem; color: #cbd5e1; }
+
+    #preview-area { margin-bottom: 20px; display: none; }
+    #preview-area h3 { font-size: 0.9rem; margin-bottom: 8px; color: #cbd5e1; }
+    canvas { width: 100%; max-width: 270px; height: auto; border-radius: 12px; border: 2px solid #38bdf8; }
+
+    .btn-action { width: 100%; padding: 14px; background: #0284c7; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 1rem; cursor: pointer; transition: 0.2s; }
+    .btn-action:disabled { background: #475569; cursor: not-allowed; }
+    
+    #status { margin-top: 15px; font-size: 0.85rem; color: #a855f7; min-height: 20px; font-weight: 500; }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+
+<div class="container">
+  <h1>🎬 Gerador de Cortes Inteligentes</h1>
+  <p class="desc">Cortes em 9:16 otimizados para o navegador do celular.</p>
+
+  <div class="upload-group">
+    <div class="upload-btn">
+      <label>1. Vídeo da Galeria (MP4/MOV)</label>
+      <input type="file" id="videoInput" accept="video/*">
+    </div>
+    <div class="upload-btn">
+      <label>2. Imagem de Fundo (Galeria)</label>
+      <input type="file" id="bgInput" accept="image/*">
+    </div>
+  </div>
+
+  <div id="preview-area">
+    <h3>👁️ Demonstração de Layout</h3>
+    <canvas id="previewCanvas" width="1080" height="1920"></canvas>
+  </div>
+
+  <button id="processBtn" class="btn-action" disabled>🚀 Processar e Gerar Cortes</button>
+
+  <div id="status">Aguardando envio dos arquivos...</div>
+</div>
+
+<script>
+  const { createFFmpeg, fetchFile } = FFmpeg;
+  const ffmpeg = createFFmpeg({ log: true });
+
+  const videoInput = document.getElementById('videoInput');
+  const bgInput = document.getElementById('bgInput');
+  const processBtn = document.getElementById('processBtn');
+  const previewArea = document.getElementById('preview-area');
+  const canvas = document.getElementById('previewCanvas');
+  const ctx = canvas.getContext('2d');
+  const status = document.getElementById('status');
+
+  let videoFile = null;
+  let bgFile = null;
+  let videoDuration = 0;
+
+  function generatePreview() {
+    if (!videoInput.files[0] || !bgInput.files[0]) return;
+
+    videoFile = videoInput.files[0];
+    bgFile = bgInput.files[0];
+
+    status.innerText = "Gerando demonstração...";
+
+    const bgImg = new Image();
+    bgImg.src = URL.createObjectURL(bgFile);
+
+    bgImg.onload = () => {
+      ctx.drawImage(bgImg, 0, 0, 1080, 1920);
+
+      const video = document.createElement('video');
+      video.src = URL.createObjectURL(videoFile);
+      
+      video.onloadedmetadata = () => {
+        videoDuration = video.duration;
+      };
+
+      video.currentTime = 2;
+
+      video.onloadeddata = () => {
+        ctx.drawImage(video, 0, 555, 1080, 810);
+        previewArea.style.display = "block";
+        processBtn.disabled = false;
+        status.innerText = "Demonstração pronta! Clique abaixo para processar.";
+      };
+    };
+  }
+
+  videoInput.addEventListener('change', generatePreview);
+  bgInput.addEventListener('change', generatePreview);
+
+  processBtn.addEventListener('click', async () => {
+    processBtn.disabled = true;
+    status.innerText = "Carregando o motor de processamento...";
+
+    try {
+      if (!ffmpeg.isLoaded()) {
+        await ffmpeg.load();
+      }
+
+      status.innerText = "Carregando arquivos do celular...";
+      ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(videoFile));
+      ffmpeg.FS('writeFile', 'bg.png', await fetchFile(bgFile));
+
+      const zip = new JSZip();
+      
+      // Define a duração base do corte (ex: 30s)
+      const targetCutDuration = 30; 
+      let start = 0;
+      let count = 1;
+
+      const totalTime = videoDuration || 60; // Padrão se não ler duração
+
+      while (start + 20 <= totalTime) {
+        let currentCutDuration = targetCutDuration;
+        
+        // Garante que o último corte tenha no mínimo 20s e no máximo 60s
+        if (start + currentCutDuration > totalTime) {
+          currentCutDuration = totalTime - start;
+        }
+
+        if (currentCutDuration < 20) break;
+
+        const outName = `corte_${String(count).padStart(2, '0')}.mp4`;
+        status.innerText = `Processando Corte ${count} (${start.toFixed(0)}s até ${(start + currentCutDuration).toFixed(0)}s)...`;
+
+        // Renderização ultra otimizada para o processador do celular
+        await ffmpeg.run(
+          '-ss', `${start.toFixed(1)}`,
+          '-t', `${currentCutDuration.toFixed(1)}`,
+          '-i', 'input.mp4',
+          '-loop', '1',
+          '-i', 'bg.png',
+          '-filter_complex', '[1:v]scale=1080:1920[bg]; [0:v]scale=1080:810[vid]; [bg][vid]overlay=0:555:shortest=1',
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-tune', 'fastdecode',
+          '-c:a', 'aac',
+          outName
+        );
+
+        const data = ffmpeg.FS('readFile', outName);
+        zip.file(outName, data.buffer);
+
+        // Limpa o arquivo temporário da memória RAM
+        ffmpeg.FS('unlink', outName);
+
+        start += currentCutDuration;
+        count++;
+
+        if (count > 10) break; // Trava de segurança para não lotar a memória
+      }
+
+      status.innerText = "Compactando os cortes no arquivo .ZIP...";
+      const zipContent = await zip.generateAsync({ type: "blob" });
+
+      const downloadLink = document.createElement("a");
+      downloadLink.href = URL.createObjectURL(zipContent);
+      downloadLink.download = "cortes_gerados_9x16.zip";
+      downloadLink.click();
+
+      status.innerText = "🎉 Sucesso! Download dos cortes em .ZIP iniciado!";
+    } catch (err) {
+      console.error(err);
+      status.innerText = "❌ Erro de memória no navegador. Tente testar com um vídeo menor (ex: 1 a 2 minutos).";
+    } finally {
+      processBtn.disabled = false;
+    }
+  });
+</script>
+
+</body>
+  </html>
+  
